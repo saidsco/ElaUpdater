@@ -9,6 +9,14 @@ from PySide6.QtCore import QThread, Signal
 
 import updater
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 class UpdateWorker(QThread):
     update_signal = Signal(str)
@@ -19,6 +27,7 @@ class UpdateWorker(QThread):
             self.update_signal.emit("Konfiguration wird geladen...")
             config = updater.load_config()
             data_dir = updater.Path(config["data_dir"])
+            unpack_dir = updater.Path(config["unpack_dir"])
             version_map_file = config["version_map_file"]
             patches_url = config["patches_url"]
             
@@ -62,7 +71,7 @@ class UpdateWorker(QThread):
                         updater.download_file(url, download_path)
                         self.update_signal.emit(f"✅ '{file_name}' heruntergeladen")
                         
-                        updater.extract_7z(download_path, data_dir)
+                        updater.extract_7z(download_path, unpack_dir)
                         self.update_signal.emit(f"📂 '{file_name}' entpackt")
                         
                         version_map[file_key] = remote_timestamp
@@ -92,7 +101,7 @@ class BorderlessWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         # Background image setup
-        pixmap = QPixmap('background.png')
+        pixmap = QPixmap(resource_path('background.png'))
         self.background = QLabel(self)
         self.background.setPixmap(pixmap)
         self.background.resize(pixmap.size())
