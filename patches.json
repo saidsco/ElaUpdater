@@ -1,0 +1,13 @@
+{
+    "Basis": "http://uo-elantharil.de:8080/patcher/basispatch.ela",
+    "Misc": "http://uo-elantharil.de:8080/patcher/mainpatch.ela",
+    "MapundStatic": "http://uo-elantharil.de:8080/patcher/map-statics.ela",
+    "Itemeinstellungen": "http://uo-elantharil.de:8080/patcher/tiledata.ela",
+    "Grafik": "http://uo-elantharil.de:8080/patcher/grafikpatch.ela",
+    "Animationen1": "http://uo-elantharil.de:8080/patcher/animations.ela",
+    "Animationen2": "http://uo-elantharil.de:8080/patcher/animations2.ela",
+    "Bodentexturen": "http://uo-elantharil.de:8080/patcher/textures.ela",
+    "Soundsystem": "http://uo-elantharil.de:8080/patcher/sound.ela",
+    "Ambiente": "http://uo-elantharil.de:8080/patcher/musicpatch.ela"
+}
+
