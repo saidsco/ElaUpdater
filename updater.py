@@ -7,38 +7,159 @@ from datetime import datetime
 from pathlib import Path
 from email.utils import parsedate_to_datetime
 
-CONFIG_FILE = Path("./config.json")
+CONFIG_FILE_PATH = "./config.json"
 PATCHES_FILE = Path("./patches_local.json")
 
 # Default configuration (used if config.json is missing or invalid)
 DEFAULT_CONFIG = {
     "patches_url": "http://uo-elantharil.de:8080/patcher/patches.json",
     "data_dir": "./data",
-    "version_map_file": "./versions.json"
+    "unpack_dir": ".",
+    "version_map_file": "./versions.json",
+    "required_file": None,  # Path to required file
+    "initial_package_url": None,  # URL for initial package download
+    "initial_package_extract_path": "."  # Where to extract initial package
 }
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+    
+def check_required_file(config):
+    """Check if the required file exists.
+    Returns:
+        tuple: (bool, str) - (exists, error_message)
+    """
+    if not config.get("required_file"):
+        return True, ""  # No required file specified, consider it exists
+        
+    required_file = Path(config["required_file"])
+    return required_file.exists(), str(required_file)
+
+def download_and_extract_initial_package(config):
+    """Download and extract the initial package if configured.
+    Returns:
+        tuple: (bool, str) - (success, error_message)
+    """
+    url = config.get("initial_package_url")
+    if not url:
+        return False, "Initial package URL not configured"
+        
+    extract_path = config.get("initial_package_extract_path", ".")
+    
+    try:
+        # Create temporary download location
+        data_dir = Path(config["data_dir"])
+        data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Download the package
+        file_name = url.split("/")[-1]
+        download_path = data_dir / file_name
+        
+        download_file(url, download_path)
+        
+        # Extract the package
+        extract_7z(download_path, extract_path)
+        
+        # Verify the required file now exists
+        exists, path = check_required_file(config)
+        if not exists:
+            return False, f"Required file still missing after installation: {path}"
+            
+        return True, "Installation successful"
+        
+    except requests.exceptions.RequestException as e:
+        return False, f"Failed to download initial package: {e}"
+    except py7zr.Bad7zFile as e:
+        return False, f"Failed to extract initial package: {e}"
+    except Exception as e:
+        return False, f"Installation failed: {e}"
+    finally:
+        # Clean up downloaded package
+        if 'download_path' in locals():
+            try:
+                download_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 def load_config():
     """Load configuration from config.json or use defaults if not available."""
+    configfile = Path(resource_path(CONFIG_FILE_PATH))
     try:
-        if not CONFIG_FILE.exists():
-            print(f"Warnung: Konfigurationsdatei {CONFIG_FILE} nicht gefunden. Verwende Standardkonfiguration.")
+        if not configfile.exists():
+            print(f"Warning: Configuration file {configfile} not found. Using default configuration.")
             return DEFAULT_CONFIG
             
-        with open(CONFIG_FILE, "r") as f:
+        with open(configfile, "r") as f:
             config = json.load(f)
             
         # Ensure all required keys exist
-        for key in DEFAULT_CONFIG:
+        for key, default_value in DEFAULT_CONFIG.items():
             if key not in config:
-                print(f"Warnung: '{key}' fehlt in der Konfiguration. Verwende Standardwert.")
-                config[key] = DEFAULT_CONFIG[key]
+                print(f"Warning: '{key}' missing from configuration. Using default value.")
+                config[key] = default_value
+                
         return config
     except json.JSONDecodeError:
-        print(f"Fehler: Konfigurationsdatei {CONFIG_FILE} ist kein gültiges JSON. Verwende Standardkonfiguration.")
+        print(f"Error: Configuration file {configfile} is not valid JSON. Using default configuration.")
         return DEFAULT_CONFIG
     except Exception as e:
-        print(f"Fehler beim Laden der Konfiguration: {e}. Verwende Standardkonfiguration.")
+        print(f"Error loading configuration: {e}. Using default configuration.")
         return DEFAULT_CONFIG
+
+def update_version_map_from_patches(patches, version_map_file):
+    """
+    Update versions.json based on the timestamps of files in patches.json.
+    Creates the file if it doesn't exist, and updates only when remote timestamps differ.
+    
+    Args:
+        patches: Dictionary of patches from patches.json
+        version_map_file: Path to the versions.json file
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Load existing version map if it exists
+        version_map = load_version_map(version_map_file)
+        updated = False
+        
+        print(f"Aktualisiere Versionsübersicht für {len(patches)} Patches...")
+        
+        # Check each patch file for timestamp
+        for file_key, url in patches.items():
+            try:
+                remote_timestamp = get_remote_timestamp(url)
+                if remote_timestamp is None:
+                    print(f"Zeitstempel für {url} konnte nicht abgerufen werden")
+                    continue
+                    
+                local_timestamp = version_map.get(file_key, 0)
+                
+                # Update only if timestamp differs
+                if remote_timestamp != local_timestamp:
+                    print(f"Aktualisiere Zeitstempel für '{file_key}'")
+                    version_map[file_key] = remote_timestamp
+                    updated = True
+            except Exception as e:
+                print(f"Fehler beim Abrufen des Zeitstempels für '{file_key}': {e}")
+                continue
+        
+        # Save the version map if any updates were made
+        if updated:
+            save_version_map(version_map, version_map_file)
+            print(f"Versionsübersicht gespeichert in {version_map_file}")
+        else:
+            print("Keine Änderungen in der Versionsübersicht")
+            
+        return True
+    except Exception as e:
+        print(f"Fehler beim Aktualisieren der Versionsübersicht: {e}")
+        return False
 
 def download_patches(patches_url):
     """Download patches.json from the specified URL."""
@@ -142,9 +263,6 @@ def check_and_update_files():
     version_map_file = config["version_map_file"]
     patches_url = config["patches_url"]
     
-    # Load version map
-    version_map = load_version_map(version_map_file)
-    
     # Ensure data directory exists
     data_dir.mkdir(parents=True, exist_ok=True)
     
@@ -160,6 +278,12 @@ def check_and_update_files():
         if patches is None:
             print("Fehler: Patches konnten nicht geladen werden. Fortfahren nicht möglich.")
             sys.exit(1)
+    
+    # Automatically update versions.json based on patches
+    update_version_map_from_patches(patches, version_map_file)
+    
+    # Load version map after potential update
+    version_map = load_version_map(version_map_file)
     
     # Now process each file in the patches dictionary
     for file_key, url in patches.items():

@@ -2,6 +2,9 @@
     "patches_url": "http://uo-elantharil.de:8080/patcher/patches.json",
     "data_dir": "./data",
     "unpack_dir": ".",
-    "version_map_file": "./versions.json"
+    "version_map_file": "./versions.json",
+    "required_file": "./client.exe",
+    "initial_package_url": "https://uo-elantharil.de:8443/patcher/Install.ela",
+    "initial_package_extract_path": "."
 }
 
