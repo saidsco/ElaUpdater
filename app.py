@@ -400,16 +400,17 @@ class BorderlessWindow(QWidget):
                 subprocess.Popen([client_exe, "-settings", settings_path], shell=True)
             else:
                 settings_path = "./settings.json"
-                self.update_status("Linux/Unix erkannt: Client wird mit Wine gestartet.")
-                wine_path = "wine"
+                self.update_status("Linux/Unix erkannt: Client wird mit nativ gestartet.")
+                client_linux = "ClassicUO.bin.x86_64"
+                #wine_path = "wine"
                 
-                try:
-                    subprocess.run([wine_path, "--version"], capture_output=True, check=True)
-                except (subprocess.SubprocessError, FileNotFoundError):
-                    self.update_status("❌ Fehler: Wine ist nicht installiert oder nicht im PATH.")
-                    return
+                #try:
+                #    subprocess.run([wine_path, "--version"], capture_output=True, check=True)
+                #except (subprocess.SubprocessError, FileNotFoundError):
+                #    self.update_status("❌ Fehler: Wine ist nicht installiert oder nicht im PATH.")
+                #    return
                 
-                subprocess.Popen([wine_path, client_exe, "-settings", settings_path])
+                subprocess.Popen([client_linux, "-settings", settings_path])
                 
             self.update_status("✅ Client erfolgreich gestartet.")
         except Exception as e:
