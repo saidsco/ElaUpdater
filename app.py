@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 import platform
 import subprocess
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
@@ -162,6 +163,10 @@ class BorderlessWindow(QWidget):
         self.start_client_btn.clicked.connect(self.launch_client)
         self.start_client_btn.setStyleSheet("padding: 5px 10px;")
         
+        self.start_client_new_btn = QPushButton('Neuen Client Starten', self)
+        self.start_client_new_btn.clicked.connect(self.launch_client_new)
+        self.start_client_new_btn.setStyleSheet("padding: 5px 10px;")
+        
         self.install_btn = QPushButton('Installieren', self)
         self.install_btn.clicked.connect(self.start_installation)
         self.install_btn.setStyleSheet("padding: 5px 10px;")
@@ -170,6 +175,7 @@ class BorderlessWindow(QWidget):
         # Button layout
         self.button_layout = QHBoxLayout()
         self.button_layout.addWidget(self.start_client_btn)
+        self.button_layout.addWidget(self.start_client_new_btn)
         self.button_layout.addWidget(self.install_btn)
         self.button_layout.addWidget(self.close_btn)
 
@@ -196,10 +202,12 @@ class BorderlessWindow(QWidget):
             print("DEBUG: Required file missing, showing install button")
             self.update_status(f"⚠️ Erforderliche Datei fehlt: {path}")
             self.start_client_btn.hide()
+            self.start_client_new_btn.hide()
             self.install_btn.show()
         else:
             print("DEBUG: Required file exists, showing client button")
             self.start_client_btn.show()
+            self.start_client_new_btn.show()
             self.install_btn.hide()
             # Start update worker only if file exists
             print("DEBUG: Creating and starting UpdateWorker")
@@ -242,6 +250,39 @@ class BorderlessWindow(QWidget):
             self.update_status("Client wird gestartet...")
             
             if platform.system() == "Windows":
+                self.update_status("Windows erkannt: Client wird direkt gestartet.")
+                subprocess.Popen([client_exe], shell=True)
+            else:
+                self.update_status("Linux/Unix erkannt: Client wird mit Wine gestartet.")
+                wine_path = "wine"
+                
+                try:
+                    subprocess.run([wine_path, "--version"], capture_output=True, check=True)
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    self.update_status("❌ Fehler: Wine ist nicht installiert oder nicht im PATH.")
+                    return
+                
+                subprocess.Popen([wine_path, client_exe])
+                
+            self.update_status("✅ Client erfolgreich gestartet.")
+        except Exception as e:
+            self.update_status(f"❌ Fehler beim Starten des Clients: {e}")
+
+    def launch_client_new(self):
+        """Launch the client application based on the operating system."""
+        # Check if required file exists before launching
+        exists, path = updater.check_required_file(self.config)
+        if not exists:
+            self.update_status(f"❌ Client kann nicht gestartet werden. Erforderliche Datei fehlt: {path}")
+            return
+
+        client_exe = "ElaUO.exe"
+        try:
+            self.update_status("Client wird gestartet...")
+            
+            if platform.system() == "Windows":
+                settings_path = ensure_settings_file()
+                client_exe = client_exe + " -settings " + settings_path
                 self.update_status("Windows erkannt: Client wird direkt gestartet.")
                 subprocess.Popen([client_exe], shell=True)
             else:
