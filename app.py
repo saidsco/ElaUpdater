@@ -401,7 +401,7 @@ class BorderlessWindow(QWidget):
             else:
                 settings_path = "./settings.json"
                 self.update_status("Linux/Unix erkannt: Client wird mit nativ gestartet.")
-                client_linux = "ClassicUO.bin.x86_64"
+                client_linux = "./ClassicUO.bin.x86_64"
                 #wine_path = "wine"
                 
                 #try:
