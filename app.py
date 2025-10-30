@@ -260,12 +260,17 @@ class BorderlessWindow(QWidget):
         self.install_btn.clicked.connect(self.start_installation)
         self.install_btn.setStyleSheet("padding: 5px 10px;")
         self.install_btn.hide()  # Hidden by default
+        
+        self.create_shortcut_btn = QPushButton('Verknüpfung erstellen', self)
+        self.create_shortcut_btn.clicked.connect(self.create_desktop_shortcut)
+        self.create_shortcut_btn.setStyleSheet("padding: 5px 10px;")
 
         # Button layout
         self.button_layout = QHBoxLayout()
         self.button_layout.addWidget(self.start_client_btn)
         self.button_layout.addWidget(self.start_client_new_btn)
         self.button_layout.addWidget(self.install_btn)
+        self.button_layout.addWidget(self.create_shortcut_btn)
         self.button_layout.addWidget(self.close_btn)
 
         # Grid layout
@@ -347,6 +352,105 @@ class BorderlessWindow(QWidget):
             self.progress_bar.setValue(percentage)
             self.progress_bar.setFormat(f"{current}/{total} - {percentage}%")
         self.progress_label.setText(detail_message)
+    
+    def create_desktop_shortcut(self):
+        """Create a desktop shortcut to the updater executable."""
+        try:
+            # Get the path to the current executable
+            if getattr(sys, 'frozen', False):
+                # Running as bundled executable
+                exe_path = sys.executable
+            else:
+                # Running as script
+                exe_path = os.path.abspath(__file__)
+            
+            if platform.system() == "Windows":
+                self.create_windows_shortcut(exe_path)
+            else:
+                self.create_linux_shortcut(exe_path)
+                
+        except Exception as e:
+            self.update_status(f"❌ Fehler beim Erstellen der Verknüpfung: {e}")
+    
+    def create_windows_shortcut(self, exe_path):
+        """Create a Windows desktop shortcut."""
+        try:
+            import winshell
+            from win32com.client import Dispatch
+            import shutil
+            
+            desktop = winshell.desktop()
+            shortcut_path = os.path.join(desktop, "Elantharil Updater.lnk")
+            
+            shell = Dispatch('WScript.Shell')
+            shortcut = shell.CreateShortCut(shortcut_path)
+            shortcut.Targetpath = exe_path
+            shortcut.WorkingDirectory = os.path.dirname(exe_path)
+            
+            # Extract icon to permanent location if embedded
+            icon_resource = resource_path('ela.ico')
+            permanent_icon = os.path.join(os.path.dirname(exe_path), 'ela.ico')
+            
+            if os.path.exists(icon_resource) and not os.path.exists(permanent_icon):
+                shutil.copy2(icon_resource, permanent_icon)
+            
+            if os.path.exists(permanent_icon):
+                shortcut.IconLocation = permanent_icon
+            
+            shortcut.save()
+            self.update_status("✅ Desktop-Verknüpfung erfolgreich erstellt!")
+            
+        except ImportError:
+            self.update_status("❌ Fehler: Benötigte Module (winshell, pywin32) nicht installiert")
+        except Exception as e:
+            self.update_status(f"❌ Fehler beim Erstellen der Windows-Verknüpfung: {e}")
+    
+    def create_linux_shortcut(self, exe_path):
+        """Create a Linux desktop shortcut (.desktop file)."""
+        try:
+            import shutil
+            
+            desktop_path = os.path.expanduser("~/Desktop")
+            
+            # Check if Desktop directory exists, otherwise use ~/.local/share/applications
+            if not os.path.exists(desktop_path):
+                desktop_path = os.path.expanduser("~/.local/share/applications")
+                os.makedirs(desktop_path, exist_ok=True)
+            
+            shortcut_path = os.path.join(desktop_path, "elantharil-updater.desktop")
+            
+            # Extract icon to permanent location if embedded
+            icon_resource = resource_path('ela.ico')
+            permanent_icon = os.path.join(os.path.dirname(exe_path), 'ela.ico')
+            
+            if os.path.exists(icon_resource) and not os.path.exists(permanent_icon):
+                shutil.copy2(icon_resource, permanent_icon)
+            
+            icon_path = permanent_icon if os.path.exists(permanent_icon) else ""
+            
+            desktop_content = f"""[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Elantharil Updater
+Comment=Elantharil Game Updater and Launcher
+Exec={exe_path}
+Path={os.path.dirname(exe_path)}
+Icon={icon_path}
+Terminal=false
+Categories=Game;
+"""
+            
+            with open(shortcut_path, 'w') as f:
+                f.write(desktop_content)
+            
+            # Make the .desktop file executable
+            os.chmod(shortcut_path, 0o755)
+            
+            location = "Desktop" if "Desktop" in desktop_path else "Anwendungsmenü"
+            self.update_status(f"✅ Verknüpfung erfolgreich erstellt ({location})!")
+            
+        except Exception as e:
+            self.update_status(f"❌ Fehler beim Erstellen der Linux-Verknüpfung: {e}")
 
     def update_status(self, message):
         """Update the status text area."""

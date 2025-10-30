@@ -22,3 +22,5 @@ setuptools==78.1.1
 shiboken6==6.9.0
 texttable==1.7.0
 urllib3==2.4.0
+pywin32; platform_system=="Windows"
+winshell; platform_system=="Windows"
