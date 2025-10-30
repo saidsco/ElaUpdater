@@ -2,6 +2,7 @@ import sys
 import os
 import platform
 import subprocess
+import stat
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
                                QGridLayout, QHBoxLayout, QVBoxLayout, QTextEdit, QProgressBar)
 from PySide6.QtGui import QPixmap, QIcon, Qt
@@ -409,7 +410,7 @@ class BorderlessWindow(QWidget):
                 #except (subprocess.SubprocessError, FileNotFoundError):
                 #    self.update_status("❌ Fehler: Wine ist nicht installiert oder nicht im PATH.")
                 #    return
-                
+                os.chmod(client_linux, os.stat(client_linux).st_mode | stat.S_IEXEC)
                 subprocess.Popen([client_linux, "-settings", settings_path])
                 
             self.update_status("✅ Client erfolgreich gestartet.")
