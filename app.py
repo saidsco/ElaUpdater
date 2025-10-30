@@ -1,11 +1,10 @@
 import sys
 import os
-import shutil
 import platform
 import subprocess
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QPushButton,
-                               QGridLayout, QHBoxLayout, QTextEdit)
-from PySide6.QtGui import QPixmap, Qt
+                               QGridLayout, QHBoxLayout, QVBoxLayout, QTextEdit, QProgressBar)
+from PySide6.QtGui import QPixmap, QIcon, Qt
 from PySide6.QtCore import QThread, Signal
 
 import updater
@@ -20,26 +19,68 @@ def resource_path(relative_path):
 
 class InstallWorker(QThread):
     update_signal = Signal(str)
+    progress_signal = Signal(int, int, str)  # current, total, detail_message
     finished_signal = Signal(bool)
 
     def run(self):
         try:
             config = updater.load_config()
             self.update_signal.emit("🔄 Installation wird gestartet...")
-            success, message = updater.download_and_extract_initial_package(config)
+            self.progress_signal.emit(1, 3, "Lade Installationspaket herunter...")
             
-            if success:
+            url = config.get("initial_package_url")
+            if not url:
+                self.update_signal.emit("❌ Installation fehlgeschlagen: Initial package URL not configured")
+                self.finished_signal.emit(False)
+                return
+            
+            extract_path = config.get("initial_package_extract_path", ".")
+            data_dir = updater.Path(config["data_dir"])
+            data_dir.mkdir(parents=True, exist_ok=True)
+            
+            file_name = url.split("/")[-1]
+            download_path = data_dir / file_name
+            
+            try:
+                # Download
+                self.progress_signal.emit(1, 3, f"Lade {file_name} herunter...")
+                updater.download_file(url, download_path)
+                self.update_signal.emit(f"✅ '{file_name}' heruntergeladen")
+                
+                # Extract
+                self.progress_signal.emit(2, 3, f"Entpacke {file_name}...")
+                updater.extract_7z(download_path, extract_path)
+                self.update_signal.emit(f"📂 '{file_name}' entpackt")
+                
+                # Verify
+                self.progress_signal.emit(3, 3, "Überprüfe Installation...")
+                exists, path = updater.check_required_file(config)
+                if not exists:
+                    self.update_signal.emit(f"❌ Installation fehlgeschlagen: Erforderliche Datei fehlt: {path}")
+                    self.finished_signal.emit(False)
+                    return
+                
                 self.update_signal.emit("✅ Installation erfolgreich abgeschlossen!")
                 self.finished_signal.emit(True)
-            else:
-                self.update_signal.emit(f"❌ Installation fehlgeschlagen: {message}")
+                
+            except Exception as e:
+                self.update_signal.emit(f"❌ Installationsfehler: {e}")
                 self.finished_signal.emit(False)
+            finally:
+                # Clean up
+                try:
+                    download_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                    
         except Exception as e:
             self.update_signal.emit(f"❌ Installationsfehler: {e}")
             self.finished_signal.emit(False)
 
 class UpdateWorker(QThread):
     update_signal = Signal(str)
+    progress_signal = Signal(int, int, str)  # current, total, detail_message
+    finished_signal = Signal()
 
     def run(self):
         try:
@@ -77,8 +118,10 @@ class UpdateWorker(QThread):
                     return
             
             # Process each patch
-            for file_key, url in patches.items():
+            total_patches = len(patches)
+            for idx, (file_key, url) in enumerate(patches.items(), 1):
                 self.update_signal.emit(f"Überprüfe: {file_key}")
+                self.progress_signal.emit(idx, total_patches, f"Überprüfe {file_key}...")
                 
                 remote_timestamp = updater.get_remote_timestamp(url)
                 if remote_timestamp is None:
@@ -93,9 +136,11 @@ class UpdateWorker(QThread):
                     download_path = data_dir / file_name
                     
                     try:
+                        self.progress_signal.emit(idx, total_patches, f"Lade {file_name} herunter...")
                         updater.download_file(url, download_path)
                         self.update_signal.emit(f"✅ '{file_name}' heruntergeladen")
                         
+                        self.progress_signal.emit(idx, total_patches, f"Entpacke {file_name}...")
                         updater.extract_7z(download_path, unpack_dir)
                         self.update_signal.emit(f"📂 '{file_name}' entpackt")
                         
@@ -110,6 +155,8 @@ class UpdateWorker(QThread):
             self.update_signal.emit("\n✅ Alle Aufgaben abgeschlossen!")
         except Exception as e:
             self.update_signal.emit(f"\n❌ Fehler während des Update-Prozesses: {e}")
+        finally:
+            self.finished_signal.emit()
 
 
 class BorderlessWindow(QWidget):
@@ -136,6 +183,11 @@ class BorderlessWindow(QWidget):
         # Borderless and transparency setup
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # Set window icon
+        icon_path = resource_path('ela.ico')
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # Background image setup
         pixmap = QPixmap(resource_path('background.png'))
@@ -146,13 +198,49 @@ class BorderlessWindow(QWidget):
         # Text area for status updates
         self.output = QTextEdit(self)
         self.output.setReadOnly(True)
-        self.output.setStyleSheet("background-color: rgba(255, 255, 255, 200);"
-                               "border-radius: 10px; margin-top: 75px;"
+        self.output.setStyleSheet("QTextEdit { "
+                               "background-color: rgba(255, 255, 255, 200);"
+                               "border-radius: 10px;"
                                "padding: 10px;"
-                               "color: rgba(0, 0, 0, 200);")
+                               "color: rgba(0, 0, 0, 200); }"
+                               "QScrollBar:vertical { width: 12px; }")
         self.output.setMinimumWidth(300)
         self.output.setMaximumWidth(400)
         self.output.setMinimumHeight(400)
+        self.output.setContentsMargins(0, 75, 0, 0)
+
+        # Progress bar and status in center area
+        self.progress_container = QWidget(self)
+        self.progress_container.setStyleSheet("background-color: rgba(255, 255, 255, 200);"
+                                             "border-radius: 10px;"
+                                             "padding: 20px;")
+        progress_layout = QVBoxLayout(self.progress_container)
+        
+        self.progress_label = QLabel('Bereit', self)
+        self.progress_label.setStyleSheet("color: rgba(0, 0, 0, 200); font-size: 14px;")
+        self.progress_label.setAlignment(Qt.AlignCenter)
+        
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setStyleSheet(
+            "QProgressBar {"
+            "   border: 2px solid grey;"
+            "   border-radius: 5px;"
+            "   text-align: center;"
+            "   color: black;"
+            "}"
+            "QProgressBar::chunk {"
+            "   background-color: #4CAF50;"
+            "   width: 10px;"
+            "}"
+        )
+        
+        progress_layout.addWidget(self.progress_label)
+        progress_layout.addWidget(self.progress_bar)
+        self.progress_container.hide()  # Hidden by default
 
         # Create buttons
         self.close_btn = QPushButton('Schließen', self)
@@ -182,6 +270,7 @@ class BorderlessWindow(QWidget):
         # Grid layout
         grid = QGridLayout(self)
         grid.setContentsMargins(20, 20, 20, 20)
+        grid.addWidget(self.progress_container, 0, 0, 1, 1, Qt.AlignCenter)
         grid.addWidget(self.output, 0, 1, 1, 1, Qt.AlignRight | Qt.AlignTop)
         grid.addLayout(self.button_layout, 1, 0, 1, 2, Qt.AlignBottom | Qt.AlignRight)
         
@@ -209,10 +298,17 @@ class BorderlessWindow(QWidget):
             self.start_client_btn.show()
             self.start_client_new_btn.show()
             self.install_btn.hide()
+            # Disable buttons during update
+            self.start_client_btn.setEnabled(False)
+            self.start_client_new_btn.setEnabled(False)
+            # Show progress container
+            self.progress_container.show()
             # Start update worker only if file exists
             print("DEBUG: Creating and starting UpdateWorker")
             self.worker = UpdateWorker()
             self.worker.update_signal.connect(self.update_status)
+            self.worker.progress_signal.connect(self.update_progress)
+            self.worker.finished_signal.connect(self.update_finished)
             self.worker.start()
 
     def start_installation(self):
@@ -220,8 +316,10 @@ class BorderlessWindow(QWidget):
         self.install_btn.setEnabled(False)
         self.update_status("🔄 Installationsprozess wird gestartet...")
         
+        self.progress_container.show()
         self.install_worker = InstallWorker()
         self.install_worker.update_signal.connect(self.update_status)
+        self.install_worker.progress_signal.connect(self.update_progress)
         self.install_worker.finished_signal.connect(self.installation_finished)
         self.install_worker.start()
 
@@ -232,6 +330,22 @@ class BorderlessWindow(QWidget):
             self.check_required_file()  # This will update button visibility and start update worker
         else:
             self.update_status("⚠️ Installation fehlgeschlagen. Bitte erneut versuchen.")
+    
+    def update_finished(self):
+        """Handle update completion."""
+        self.start_client_btn.setEnabled(True)
+        self.start_client_new_btn.setEnabled(True)
+        self.progress_container.hide()
+        self.progress_label.setText('Bereit')
+        self.progress_bar.setValue(0)
+    
+    def update_progress(self, current, total, detail_message):
+        """Update the progress bar and detail message."""
+        if total > 0:
+            percentage = int((current / total) * 100)
+            self.progress_bar.setValue(percentage)
+            self.progress_bar.setFormat(f"{current}/{total} - {percentage}%")
+        self.progress_label.setText(detail_message)
 
     def update_status(self, message):
         """Update the status text area."""
@@ -281,11 +395,11 @@ class BorderlessWindow(QWidget):
             self.update_status("Client wird gestartet...")
             
             if platform.system() == "Windows":
-                settings_path = ensure_settings_file()
-                client_exe = client_exe + " -settings " + settings_path
+                settings_path = ".\\settings.json"
                 self.update_status("Windows erkannt: Client wird direkt gestartet.")
-                subprocess.Popen([client_exe], shell=True)
+                subprocess.Popen([client_exe, "-settings", settings_path], shell=True)
             else:
+                settings_path = "./settings.json"
                 self.update_status("Linux/Unix erkannt: Client wird mit Wine gestartet.")
                 wine_path = "wine"
                 
@@ -295,7 +409,7 @@ class BorderlessWindow(QWidget):
                     self.update_status("❌ Fehler: Wine ist nicht installiert oder nicht im PATH.")
                     return
                 
-                subprocess.Popen([wine_path, client_exe])
+                subprocess.Popen([wine_path, client_exe, "-settings", settings_path])
                 
             self.update_status("✅ Client erfolgreich gestartet.")
         except Exception as e:

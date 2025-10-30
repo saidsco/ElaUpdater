@@ -1,5 +1,8 @@
+
+
+
 {
-    "patches_url": "http://uo-elantharil.de:8080/patcher/patches.json",
+    "patches_url": "https://uo-elantharil.de:8443/patcher/patches.json",
     "data_dir": "./data",
     "unpack_dir": ".",
     "version_map_file": "./versions.json",
